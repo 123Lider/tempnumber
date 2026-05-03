@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ number.number }} - Inbox</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <a href="{{ url_for('index') }}" class="back-link">&larr; Back to Numbers</a>
+            <h1>Inbox: {{ number.number }}</h1>
+            <p class="subtitle">
+                {% if number.is_expired() %}
+                    <span class="expired-badge">Expired</span>
+                {% else %}
+                    <span class="active-badge">Active until {{ number.expires_at.strftime('%H:%M, %d %b %Y') }}</span>
+                {% endif %}
+            </p>
+        </header>
+
+        <section class="messages">
+            {% if messages %}
+                <div class="message-list">
+                    {% for message in messages %}
+                        <div class="message-item {% if message.message_type == 'call' %}call-message{% endif %}">
+                            <div class="message-type-badge">
+                                {{ '📞 Call' if message.message_type == 'call' else '💬 SMS' }}
+                            </div>
+                            <div class="message-from">From: {{ message.from_number }}</div>
+                            <div class="message-time">{{ message.received_at.strftime('%H:%M:%S - %d %b %Y') }}</div>
+                            <div class="message-preview">
+                                {% if message.message_type == 'call' %}
+                                    Call recording available
+                                {% else %}
+                                    {{ message.body[:100] }}{% if message.body|length > 100 %}...{% endif %}
+                                {% endif %}
+                            </div>
+                            {% if message.media_urls %}
+                                <div class="message-media">📎 Has media attachments</div>
+                            {% endif %}
+                            <a href="{{ url_for('message_detail', message_id=message.id) }}" class="btn btn-small">View Details</a>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <div class="empty-state">
+                    <p>No messages yet for this number.</p>
+                    <p>Send an SMS or call to <strong>{{ number.number }}</strong> to see it here.</p>
+                </div>
+            {% endif %}
+        </section>
+
+        <section class="number-info">
+            <h2>Webhook Info</h2>
+            <div class="info-box">
+                <p><strong>SMS Webhook:</strong> <code>{{ url_for('sms_webhook', _external=True) }}</code></p>
+                <p><strong>Voice Webhook:</strong> <code>{{ url_for('voice_webhook', _external=True) }}</code></p>
+            </div>
+        </section>
+    </div>
+</body>
+</html>
