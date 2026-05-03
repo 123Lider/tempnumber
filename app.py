@@ -1,15 +1,20 @@
 import os
 import threading
 import time
+import random
+import string
 from datetime import datetime, timedelta
+from functools import wraps
+
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import desc
 from twilio.rest import Client
 from twilio.twiml.messaging_response import MessagingResponse
 from twilio.twiml.voice_response import VoiceResponse
-import random
-import string
+from flask_socketio import SocketIO, emit
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 
 from config import Config
 
@@ -19,6 +24,12 @@ app.config['SQLALCHEMY_DATABASE_URI'] = Config.DATABASE_URL
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
+socketio = SocketIO(app, cors_allowed_origins="*")
+limiter = Limiter(
+    app=app,
+    key_func=get_remote_address,
+    default_limits=["60 per minute"]
+)
 
 # ==================== DATABASE MODELS ====================
 
@@ -49,10 +60,10 @@ class Message(db.Model):
     from_number = db.Column(db.String(20), nullable=False)
     to_number = db.Column(db.String(20), nullable=False)
     body = db.Column(db.Text, nullable=True)
-    media_urls = db.Column(db.Text, nullable=True)  # Comma-separated URLs
-    message_type = db.Column(db.String(10), default='sms')  # 'sms' or 'call'
+    media_urls = db.Column(db.Text, nullable=True)
+    message_type = db.Column(db.String(10), default='sms')
     call_recording_url = db.Column(db.String(500), nullable=True)
-    call_duration = db.Column(db.Integer, nullable=True)  # seconds
+    call_duration = db.Column(db.Integer, nullable=True)
     received_at = db.Column(db.DateTime, default=datetime.utcnow)
     
     def to_dict(self):
@@ -68,34 +79,26 @@ class Message(db.Model):
             'received_at': self.received_at.isoformat()
         }
 
-# ==================== NUMBERS MANAGEMENT ====================
+# ==================== API KEY AUTH ====================
+
+def require_api_key(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        api_key = request.headers.get('X-API-Key')
+        if not api_key or api_key not in Config.API_KEYS:
+            return jsonify({'error': 'Invalid or missing API key'}), 401
+        return f(*args, **kwargs)
+    return decorated
+
+# ==================== NUMBER GENERATION ====================
 
 def generate_temp_number():
-    """Generate a random temporary number (simulated)"""
+    """Generate a random temporary US phone number"""
     area_codes = ['212', '310', '415', '617', '312', '404', '713', '602', '206', '305']
     area = random.choice(area_codes)
     prefix = ''.join(random.choices(string.digits, k=3))
     line = ''.join(random.choices(string.digits, k=4))
     return f"+1{area}{prefix}{line}"
-
-def assign_twilio_number():
-    """Search and buy a Twilio number (production)"""
-    client = Client(Config.TWILIO_ACCOUNT_SID, Config.TWILIO_AUTH_TOKEN)
-    
-    # Search for available numbers
-    available = client.available_phone_numbers("US").local.list(limit=5)
-    
-    if not available:
-        return None
-    
-    # Buy the first available number
-    purchased = client.incoming_phone_numbers.create(
-        phone_number=available[0].phone_number,
-        sms_url=url_for('sms_webhook', _external=True),
-        voice_url=url_for('voice_webhook', _external=True)
-    )
-    
-    return purchased.phone_number
 
 # ==================== ROUTES ====================
 
@@ -115,14 +118,11 @@ def index():
                          expired_numbers=expired_numbers)
 
 @app.route('/numbers/new', methods=['POST'])
+@limiter.limit("5 per minute")
 def create_number():
     """Create a new temporary number"""
-    duration = request.form.get('duration', 60)  # minutes
+    duration = request.form.get('duration', 60)
     
-    # In production, this would buy a real Twilio number
-    # number_str = assign_twilio_number()
-    
-    # For development, generate a simulated number
     number_str = generate_temp_number()
     
     new_number = PhoneNumber(
@@ -161,19 +161,51 @@ def message_detail(message_id):
     message = Message.query.get_or_404(message_id)
     return render_template('message_detail.html', message=message)
 
+# ==================== API ENDPOINTS ====================
+
 @app.route('/api/numbers')
+@require_api_key
 def api_numbers():
-    """API endpoint to list numbers"""
+    """API endpoint to list active numbers"""
     numbers = PhoneNumber.query.filter_by(is_active=True)\
         .filter(PhoneNumber.expires_at > datetime.utcnow()).all()
     return jsonify([n.to_dict() for n in numbers])
 
 @app.route('/api/numbers/<int:number_id>/messages')
+@require_api_key
 def api_messages(number_id):
     """API endpoint to get messages for a number"""
     messages = Message.query.filter_by(phone_number_id=number_id)\
         .order_by(desc(Message.received_at)).all()
     return jsonify([m.to_dict() for m in messages])
+
+@app.route('/api/numbers/bulk', methods=['POST'])
+@require_api_key
+@limiter.limit("2 per minute")
+def create_bulk_numbers():
+    """Generate multiple numbers at once"""
+    data = request.get_json()
+    count = min(data.get('count', 10), 100)
+    duration = data.get('duration', 60)
+    
+    numbers = []
+    for _ in range(count):
+        number_str = generate_temp_number()
+        new_number = PhoneNumber(
+            number=number_str,
+            expires_at=datetime.utcnow() + timedelta(minutes=int(duration))
+        )
+        db.session.add(new_number)
+        numbers.append(number_str)
+    
+    db.session.commit()
+    
+    return jsonify({
+        'success': True,
+        'count': len(numbers),
+        'numbers': numbers,
+        'expires_in': f'{duration} minutes'
+    })
 
 # ==================== TWILIO WEBHOOKS ====================
 
@@ -185,11 +217,9 @@ def sms_webhook():
     body = request.form.get('Body')
     num_media = int(request.form.get('NumMedia', 0))
     
-    # Find the phone number in our database
     phone = PhoneNumber.query.filter_by(number=to_number, is_active=True).first()
     
     if not phone:
-        # Number not found or inactive
         resp = MessagingResponse()
         resp.message("This number is not active or has expired.")
         return str(resp)
@@ -201,14 +231,12 @@ def sms_webhook():
         resp.message("This number has expired.")
         return str(resp)
     
-    # Collect media URLs
     media_urls = []
     for i in range(num_media):
         media_url = request.form.get(f'MediaUrl{i}')
         if media_url:
             media_urls.append(media_url)
     
-    # Save the message
     message = Message(
         phone_number_id=phone.id,
         from_number=from_number,
@@ -221,7 +249,13 @@ def sms_webhook():
     db.session.add(message)
     db.session.commit()
     
-    # Return empty TwiML response
+    # Send real-time notification via WebSocket
+    socketio.emit('new_message', {
+        'number_id': phone.id,
+        'from': from_number,
+        'preview': body[:50] if body else 'New message'
+    })
+    
     return str(MessagingResponse())
 
 @app.route('/webhook/voice', methods=['POST'])
@@ -229,9 +263,7 @@ def voice_webhook():
     """Handle incoming calls from Twilio"""
     from_number = request.form.get('From')
     to_number = request.form.get('To')
-    call_sid = request.form.get('CallSid')
     
-    # Find the phone number
     phone = PhoneNumber.query.filter_by(number=to_number, is_active=True).first()
     
     response = VoiceResponse()
@@ -240,8 +272,7 @@ def voice_webhook():
         response.say("This number is not available.", voice='alice')
         return str(response)
     
-    # Record the call
-    response.say("You have reached a temporary number. Your message will be recorded.", voice='alice')
+    response.say("You have reached a temporary number. Please leave a message after the beep.", voice='alice')
     response.record(
         action=url_for('voice_recording_complete', _external=True),
         method='POST',
@@ -258,9 +289,7 @@ def voice_recording_complete():
     to_number = request.form.get('To')
     recording_url = request.form.get('RecordingUrl')
     recording_duration = request.form.get('RecordingDuration', 0)
-    call_sid = request.form.get('CallSid')
     
-    # Find the phone
     phone = PhoneNumber.query.filter_by(number=to_number).first()
     
     if phone:
@@ -275,6 +304,12 @@ def voice_recording_complete():
         )
         db.session.add(message)
         db.session.commit()
+        
+        socketio.emit('new_message', {
+            'number_id': phone.id,
+            'from': from_number,
+            'preview': f'Call recording ({recording_duration}s)'
+        })
     
     return str(VoiceResponse())
 
@@ -293,8 +328,10 @@ def cleanup_expired_numbers():
                 number.is_active = False
             
             db.session.commit()
+            if expired:
+                print(f"Cleaned up {len(expired)} expired numbers")
         
-        time.sleep(300)  # Run every 5 minutes
+        time.sleep(300)
 
 # ==================== MAIN ====================
 
@@ -302,8 +339,7 @@ if __name__ == '__main__':
     with app.app_context():
         db.create_all()
     
-    # Start cleanup thread
     cleanup_thread = threading.Thread(target=cleanup_expired_numbers, daemon=True)
     cleanup_thread.start()
     
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    socketio.run(app, debug=True, host='0.0.0.0', port=5000)
