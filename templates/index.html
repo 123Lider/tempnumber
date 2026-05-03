@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TempNum - Temporary Phone Numbers</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📱 TempNum</h1>
+            <p class="subtitle">Temporary phone numbers for SMS & calls</p>
+        </header>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <section class="create-number">
+            <h2>Create New Number</h2>
+            <form action="{{ url_for('create_number') }}" method="POST">
+                <label for="duration">Duration (minutes):</label>
+                <select name="duration" id="duration">
+                    <option value="15">15 minutes</option>
+                    <option value="30">30 minutes</option>
+                    <option value="60" selected>1 hour</option>
+                    <option value="120">2 hours</option>
+                    <option value="360">6 hours</option>
+                    <option value="1440">24 hours</option>
+                </select>
+                <button type="submit" class="btn btn-primary">Get Number</button>
+            </form>
+        </section>
+
+        <section class="active-numbers">
+            <h2>Active Numbers</h2>
+            {% if active_numbers %}
+                <div class="number-grid">
+                    {% for number in active_numbers %}
+                        <div class="number-card">
+                            <div class="number">{{ number.number }}</div>
+                            <div class="expires">Expires: {{ number.expires_at.strftime('%Y-%m-%d %H:%M') }}</div>
+                            <div class="messages-count">{{ number.messages|length }} messages</div>
+                            <div class="actions">
+                                <a href="{{ url_for('inbox', number_id=number.id) }}" class="btn btn-small">View Inbox</a>
+                                <form action="{{ url_for('delete_number', number_id=number.id) }}" method="POST" style="display:inline;">
+                                    <button type="submit" class="btn btn-small btn-danger">Release</button>
+                                </form>
+                            </div>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <p class="empty-state">No active numbers. Create one above!</p>
+            {% endif %}
+        </section>
+
+        <section class="expired-numbers">
+            <h2>Recently Expired</h2>
+            {% if expired_numbers %}
+                <ul class="expired-list">
+                    {% for number in expired_numbers %}
+                        <li>{{ number.number }} - Expired {{ number.expires_at.strftime('%Y-%m-%d %H:%M') }}</li>
+                    {% endfor %}
+                </ul>
+            {% else %}
+                <p>No expired numbers yet.</p>
+            {% endif %}
+        </section>
+    </div>
+</body>
+</html>
