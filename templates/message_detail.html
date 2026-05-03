@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Message Detail</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <a href="{{ url_for('inbox', number_id=message.phone_number_id) }}" class="back-link">&larr; Back to Inbox</a>
+            <h1>Message Detail</h1>
+        </header>
+
+        <div class="message-detail-card">
+            <div class="detail-row">
+                <span class="detail-label">Type:</span>
+                <span class="detail-value">{{ '📞 Call Recording' if message.message_type == 'call' else '💬 SMS' }}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">From:</span>
+                <span class="detail-value">{{ message.from_number }}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">To:</span>
+                <span class="detail-value">{{ message.to_number }}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Received:</span>
+                <span class="detail-value">{{ message.received_at.strftime('%Y-%m-%d %H:%M:%S') }}</span>
+            </div>
+            
+            {% if message.message_type == 'sms' %}
+                <div class="detail-row message-body">
+                    <span class="detail-label">Message:</span>
+                    <div class="message-content">{{ message.body }}</div>
+                </div>
+                
+                {% if message.media_urls %}
+                    <div class="detail-row">
+                        <span class="detail-label">Media:</span>
+                        <div class="media-list">
+                            {% for url in message.media_urls.split(',') %}
+                                <a href="{{ url }}" target="_blank">📎 Media {{ loop.index }}</a><br>
+                            {% endfor %}
+                        </div>
+                    </div>
+                {% endif %}
+            {% endif %}
+            
+            {% if message.message_type == 'call' %}
+                <div class="detail-row">
+                    <span class="detail-label">Duration:</span>
+                    <span class="detail-value">{{ message.call_duration }} seconds</span>
+                </div>
+                {% if message.call_recording_url %}
+                    <div class="detail-row">
+                        <span class="detail-label">Recording:</span>
+                        <audio controls>
+                            <source src="{{ message.call_recording_url }}.mp3" type="audio/mpeg">
+                            Your browser does not support the audio element.
+                        </audio>
+                    </div>
+                {% endif %}
+            {% endif %}
+        </div>
+    </div>
+</body>
+</html>
