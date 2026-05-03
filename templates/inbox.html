@@ -17,6 +17,7 @@
                 {% else %}
                     <span class="active-badge">Active until {{ number.expires_at.strftime('%H:%M, %d %b %Y') }}</span>
                 {% endif %}
+                | <span id="message-count">Messages: {{ messages|length }}</span>
             </p>
         </header>
 
@@ -60,5 +61,27 @@
             </div>
         </section>
     </div>
+
+    <script>
+        // Auto-refresh every 10 seconds
+        setInterval(function() {
+            fetch('/api/numbers/{{ number.id }}/messages', {
+                headers: {
+                    'X-API-Key': 'test_key_123'
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                const counter = document.getElementById('message-count');
+                if (counter) counter.textContent = 'Messages: ' + data.length;
+                
+                const currentCount = document.querySelectorAll('.message-item').length;
+                if (data.length > currentCount) {
+                    location.reload();
+                }
+            })
+            .catch(err => console.log('Polling error:', err));
+        }, 10000);
+    </script>
 </body>
 </html>
