@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - TempNum</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <a href="{{ url_for('index') }}" class="back-link">&larr; Home</a>
+            <h1>📱 Dashboard</h1>
+            <p class="subtitle">Manage your phone numbers</p>
+        </header>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <section class="register-number">
+            <h2>Register New Number</h2>
+            <form action="{{ url_for('register_number') }}" method="POST">
+                <div class="form-group">
+                    <label for="number">Your Phone Number:</label>
+                    <input type="text" id="number" name="number" 
+                           placeholder="+8801712345678" required
+                           class="form-input">
+                    <small>Include country code (e.g., +880 for Bangladesh)</small>
+                </div>
+                <div class="form-group">
+                    <label for="display_name">Display Name:</label>
+                    <input type="text" id="display_name" name="display_name" 
+                           placeholder="My Personal Number" class="form-input">
+                </div>
+                <button type="submit" class="btn btn-primary">Register Number</button>
+            </form>
+        </section>
+
+        <section class="my-numbers">
+            <h2>My Numbers</h2>
+            {% if numbers %}
+                <div class="number-grid">
+                    {% for number in numbers %}
+                        <div class="number-card">
+                            <div class="number">{{ number.number }}</div>
+                            <div class="number-name">{{ number.display_name }}</div>
+                            <div class="messages-count">{{ number.messages|length }} total messages</div>
+                            <div class="token-info">
+                                <small>Token: <code>{{ number.api_token[:16] }}...</code></small>
+                            </div>
+                            <div class="actions">
+                                <a href="{{ url_for('view_number', number_id=number.id) }}" class="btn btn-small">View Inbox</a>
+                                <form action="{{ url_for('regenerate_token', number_id=number.id) }}" method="POST" style="display:inline;">
+                                    <button type="submit" class="btn btn-small btn-warning">New Token</button>
+                                </form>
+                                <form action="{{ url_for('delete_number', number_id=number.id) }}" method="POST" style="display:inline;">
+                                    <button type="submit" class="btn btn-small btn-danger">Delete</button>
+                                </form>
+                            </div>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <div class="empty-state">
+                    <p>No numbers registered yet.</p>
+                    <p>Register your first number above!</p>
+                </div>
+            {% endif %}
+        </section>
+
+        <section class="setup-guide">
+            <h2>Android Setup Guide</h2>
+            <div class="guide-box">
+                <h3>Step 1: Install Termux</h3>
+                <p>Download Termux from <a href="https://f-droid.org/packages/com.termux/" target="_blank">F-Droid</a> or Google Play</p>
+                
+                <h3>Step 2: Install Dependencies</h3>
+                <pre><code>pkg update && pkg upgrade
+pkg install python git
+pip install requests</code></pre>
+
+                <h3>Step 3: Download & Run Forwarder</h3>
+                <pre><code># Download the script
+curl -O https://raw.githubusercontent.com/123Lider/tempnum/main/android_forwarder.py
+
+# Run with your API token
+python android_forwarder.py --token YOUR_API_TOKEN_HERE</code></pre>
+
+                <div class="tip">
+                    <strong>💡 Tip:</strong> Replace YOUR_API_TOKEN_HERE with the token shown when you registered your number!
+                </div>
+            </div>
+        </section>
+    </div>
+</body>
+</html>
