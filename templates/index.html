@@ -3,14 +3,19 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TempNum - Temporary Phone Numbers</title>
+    <title>TempNum - Free Temporary SMS Receiver</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <script src="https://cdn.socket.io/4.7.4/socket.io.min.js"></script>
 </head>
 <body>
     <div class="container">
-        <header>
+        <header class="hero">
             <h1>📱 TempNum</h1>
-            <p class="subtitle">Temporary phone numbers for SMS & calls</p>
+            <p class="subtitle">Free temporary SMS receiver - Get OTPs and messages online</p>
+            <div class="hero-buttons">
+                <a href="{{ url_for('dashboard') }}" class="btn btn-primary">Dashboard</a>
+                <a href="#how-it-works" class="btn btn-outline">How it Works</a>
+            </div>
         </header>
 
         {% with messages = get_flashed_messages(with_categories=true) %}
@@ -21,57 +26,89 @@
             {% endif %}
         {% endwith %}
 
-        <section class="create-number">
-            <h2>Create New Number</h2>
-            <form action="{{ url_for('create_number') }}" method="POST">
-                <label for="duration">Duration (minutes):</label>
-                <select name="duration" id="duration">
-                    <option value="15">15 minutes</option>
-                    <option value="30">30 minutes</option>
-                    <option value="60" selected>1 hour</option>
-                    <option value="120">2 hours</option>
-                    <option value="360">6 hours</option>
-                    <option value="1440">24 hours</option>
-                </select>
-                <button type="submit" class="btn btn-primary">Get Number</button>
-            </form>
+        <section class="active-numbers" id="active-numbers">
+            <h2>🟢 Active Numbers</h2>
+            <p class="section-desc">Numbers that are currently online and receiving SMS</p>
+            <div class="number-grid" id="number-grid">
+                <div class="loading">Loading numbers...</div>
+            </div>
         </section>
 
-        <section class="active-numbers">
-            <h2>Active Numbers</h2>
-            {% if active_numbers %}
-                <div class="number-grid">
-                    {% for number in active_numbers %}
-                        <div class="number-card">
-                            <div class="number">{{ number.number }}</div>
-                            <div class="expires">Expires: {{ number.expires_at.strftime('%Y-%m-%d %H:%M') }}</div>
-                            <div class="messages-count">{{ number.messages|length }} messages</div>
-                            <div class="actions">
-                                <a href="{{ url_for('inbox', number_id=number.id) }}" class="btn btn-small">View Inbox</a>
-                                <form action="{{ url_for('delete_number', number_id=number.id) }}" method="POST" style="display:inline;">
-                                    <button type="submit" class="btn btn-small btn-danger">Release</button>
-                                </form>
-                            </div>
-                        </div>
-                    {% endfor %}
+        <section class="how-it-works" id="how-it-works">
+            <h2>How It Works</h2>
+            <div class="steps">
+                <div class="step">
+                    <div class="step-number">1</div>
+                    <h3>Register Your Number</h3>
+                    <p>Enter your real phone number on the dashboard</p>
                 </div>
-            {% else %}
-                <p class="empty-state">No active numbers. Create one above!</p>
-            {% endif %}
+                <div class="step">
+                    <div class="step-number">2</div>
+                    <h3>Install App</h3>
+                    <p>Install Termux on Android and run the SMS forwarder script</p>
+                </div>
+                <div class="step">
+                    <div class="step-number">3</div>
+                    <h3>Receive SMS Online</h3>
+                    <p>All SMS sent to your number will appear here in real-time</p>
+                </div>
+            </div>
         </section>
 
-        <section class="expired-numbers">
-            <h2>Recently Expired</h2>
-            {% if expired_numbers %}
-                <ul class="expired-list">
-                    {% for number in expired_numbers %}
-                        <li>{{ number.number }} - Expired {{ number.expires_at.strftime('%Y-%m-%d %H:%M') }}</li>
-                    {% endfor %}
-                </ul>
-            {% else %}
-                <p>No expired numbers yet.</p>
-            {% endif %}
+        <section class="features">
+            <div class="feature-card">
+                <h3>🔒 Private</h3>
+                <p>Your messages are encrypted and only visible to you</p>
+            </div>
+            <div class="feature-card">
+                <h3>⚡ Real-time</h3>
+                <p>Messages appear instantly via WebSocket connection</p>
+            </div>
+            <div class="feature-card">
+                <h3>🆓 Free</h3>
+                <p>No hidden costs - use your existing SIM card</p>
+            </div>
         </section>
     </div>
+
+    <script>
+        const socket = io();
+
+        // Load active numbers
+        fetch('/api/public/numbers')
+            .then(r => r.json())
+            .then(data => {
+                const grid = document.getElementById('number-grid');
+                if (data.length === 0) {
+                    grid.innerHTML = '<p class="empty-state">No active numbers yet.</p>';
+                    return;
+                }
+                grid.innerHTML = data.map(n => `
+                    <div class="number-card">
+                        <div class="number-status ${n.is_online ? 'online' : 'offline'}">
+                            ${n.is_online ? '🟢 Online' : '🔴 Offline'}
+                        </div>
+                        <div class="number">${n.number}</div>
+                        <div class="number-name">${n.display_name}</div>
+                        <div class="messages-count">${n.message_count} messages received</div>
+                        <a href="/number/${n.id}" class="btn btn-small">View Messages</a>
+                    </div>
+                `).join('');
+            });
+
+        // Real-time updates
+        socket.on('new_sms', function(data) {
+            // Refresh the page if we're viewing that number's messages
+            const currentPath = window.location.pathname;
+            if (currentPath.includes(`/number/${data.number_id}`)) {
+                // Just update the count
+                const countEl = document.querySelector('.messages-count');
+                if (countEl) {
+                    const current = parseInt(countEl.textContent) || 0;
+                    countEl.textContent = (current + 1) + ' messages received';
+                }
+            }
+        });
+    </script>
 </body>
 </html>
