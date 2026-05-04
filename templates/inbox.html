@@ -3,85 +3,170 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ number.number }} - Inbox</title>
+    <title>Inbox - {{ number.number }}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <script src="https://cdn.socket.io/4.7.4/socket.io.min.js"></script>
 </head>
 <body>
     <div class="container">
         <header>
-            <a href="{{ url_for('index') }}" class="back-link">&larr; Back to Numbers</a>
-            <h1>Inbox: {{ number.number }}</h1>
+            <a href="{{ url_for('dashboard') }}" class="back-link">&larr; Dashboard</a>
+            <h1>📥 Inbox: {{ number.number }}</h1>
             <p class="subtitle">
-                {% if number.is_expired() %}
-                    <span class="expired-badge">Expired</span>
-                {% else %}
-                    <span class="active-badge">Active until {{ number.expires_at.strftime('%H:%M, %d %b %Y') }}</span>
-                {% endif %}
-                | <span id="message-count">Messages: {{ messages|length }}</span>
+                <strong>{{ number.display_name }}</strong> | 
+                <span id="message-count">{{ messages|length }} messages</span>
             </p>
         </header>
 
-        <section class="messages">
+        {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
-                <div class="message-list">
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <section class="number-info-bar">
+            <div class="info-item">
+                <strong>Status:</strong> 
+                <span class="status-badge active">Active</span>
+            </div>
+            <div class="info-item">
+                <strong>API Token:</strong>
+                <code class="token-display">{{ number.api_token }}</code>
+                <button onclick="copyToken()" class="btn btn-tiny">📋 Copy</button>
+            </div>
+        </section>
+
+        <section class="messages" id="messages-section">
+            {% if messages %}
+                <div class="message-list" id="message-list">
                     {% for message in messages %}
-                        <div class="message-item {% if message.message_type == 'call' %}call-message{% endif %}">
-                            <div class="message-type-badge">
-                                {{ '📞 Call' if message.message_type == 'call' else '💬 SMS' }}
+                        <div class="message-item" id="msg-{{ message.id }}">
+                            <div class="message-sender">
+                                <span class="sender-label">From:</span>
+                                <span class="sender-value">{{ message.sender }}</span>
                             </div>
-                            <div class="message-from">From: {{ message.from_number }}</div>
                             <div class="message-time">{{ message.received_at.strftime('%H:%M:%S - %d %b %Y') }}</div>
-                            <div class="message-preview">
-                                {% if message.message_type == 'call' %}
-                                    Call recording available
-                                {% else %}
-                                    {{ message.body[:100] }}{% if message.body|length > 100 %}...{% endif %}
-                                {% endif %}
+                            <div class="message-body">{{ message.body }}</div>
+                            <div class="message-actions">
+                                <button onclick="copyMessage('{{ message.body|replace("'", "\\'") }}')" class="btn btn-tiny">📋 Copy</button>
                             </div>
-                            {% if message.media_urls %}
-                                <div class="message-media">📎 Has media attachments</div>
-                            {% endif %}
-                            <a href="{{ url_for('message_detail', message_id=message.id) }}" class="btn btn-small">View Details</a>
                         </div>
                     {% endfor %}
                 </div>
             {% else %}
-                <div class="empty-state">
-                    <p>No messages yet for this number.</p>
-                    <p>Send an SMS or call to <strong>{{ number.number }}</strong> to see it here.</p>
+                <div class="empty-state" id="empty-state">
+                    <div class="empty-icon">📭</div>
+                    <h3>No Messages Yet</h3>
+                    <p>Send an SMS to <strong>{{ number.number }}</strong> to see it here!</p>
+                    <p class="sub-text">Make sure your Android forwarder is running.</p>
                 </div>
             {% endif %}
         </section>
 
-        <section class="number-info">
-            <h2>Webhook Info</h2>
-            <div class="info-box">
-                <p><strong>SMS Webhook:</strong> <code>{{ url_for('sms_webhook', _external=True) }}</code></p>
-                <p><strong>Voice Webhook:</strong> <code>{{ url_for('voice_webhook', _external=True) }}</code></p>
+        <section class="device-status">
+            <h2>Connected Devices</h2>
+            <div id="device-list">
+                <p class="loading-status">Checking device status...</p>
             </div>
         </section>
     </div>
 
     <script>
-        // Auto-refresh every 10 seconds
-        setInterval(function() {
-            fetch('/api/numbers/{{ number.id }}/messages', {
-                headers: {
-                    'X-API-Key': 'test_key_123'
+        const socket = io();
+        const numberId = {{ number.id }};
+        
+        // Join the room for this number
+        socket.emit('join', { number_id: numberId });
+        
+        // Listen for new messages
+        socket.on('new_sms', function(data) {
+            if (data.number_id === numberId) {
+                addNewMessage(data);
+            }
+        });
+        
+        function addNewMessage(data) {
+            // Remove empty state if present
+            const emptyState = document.getElementById('empty-state');
+            if (emptyState) emptyState.remove();
+            
+            const messageList = document.getElementById('message-list');
+            if (!messageList) {
+                // Create message list if doesn't exist
+                const section = document.getElementById('messages-section');
+                const newList = document.createElement('div');
+                newList.className = 'message-list';
+                newList.id = 'message-list';
+                section.innerHTML = '';
+                section.appendChild(newList);
+            }
+            
+            const newMsg = document.createElement('div');
+            newMsg.className = 'message-item new-message';
+            newMsg.id = 'msg-' + data.message_id;
+            newMsg.innerHTML = `
+                <div class="message-sender">
+                    <span class="sender-label">From:</span>
+                    <span class="sender-value">${data.sender}</span>
+                </div>
+                <div class="message-time">${new Date(data.time).toLocaleTimeString()} - Just now</div>
+                <div class="message-body">${data.body}</div>
+                <div class="message-actions">
+                    <button onclick="copyMessage('${data.body.replace(/'/g, "\\'")}')" class="btn btn-tiny">📋 Copy</button>
+                </div>
+            `;
+            
+            const list = document.getElementById('message-list');
+            list.insertBefore(newMsg, list.firstChild);
+            
+            // Update count
+            const countEl = document.getElementById('message-count');
+            const current = parseInt(countEl.textContent) || 0;
+            countEl.textContent = (current + 1) + ' messages';
+            
+            // Highlight animation
+            setTimeout(() => newMsg.classList.remove('new-message'), 2000);
+        }
+        
+        function copyMessage(text) {
+            navigator.clipboard.writeText(text).then(() => {
+                alert('Message copied!');
+            });
+        }
+        
+        function copyToken() {
+            const token = '{{ number.api_token }}';
+            navigator.clipboard.writeText(token).then(() => {
+                alert('API Token copied!');
+            });
+        }
+        
+        // Check device status
+        fetch('/api/public/numbers')
+            .then(r => r.json())
+            .then(numbers => {
+                const num = numbers.find(n => n.id === numberId);
+                const deviceList = document.getElementById('device-list');
+                if (num && num.is_online) {
+                    deviceList.innerHTML = '<p class="status-online">✅ Device is online and forwarding SMS</p>';
+                } else {
+                    deviceList.innerHTML = '<p class="status-offline">❌ No device connected. Start the Android forwarder.</p>';
                 }
-            })
-            .then(response => response.json())
-            .then(data => {
-                const counter = document.getElementById('message-count');
-                if (counter) counter.textContent = 'Messages: ' + data.length;
-                
-                const currentCount = document.querySelectorAll('.message-item').length;
-                if (data.length > currentCount) {
-                    location.reload();
+            });
+        
+        // Listen for device status updates
+        socket.on('device_status', function(data) {
+            if (data.number_id === numberId) {
+                const deviceList = document.getElementById('device-list');
+                if (data.is_online) {
+                    deviceList.innerHTML = '<p class="status-online">✅ Device is online and forwarding SMS</p>';
+                } else {
+                    deviceList.innerHTML = '<p class="status-offline">❌ Device disconnected</p>';
                 }
-            })
-            .catch(err => console.log('Polling error:', err));
-        }, 10000);
+            }
+        });
     </script>
 </body>
 </html>
